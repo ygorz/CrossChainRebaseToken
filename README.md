@@ -1,4 +1,5 @@
 # Cross-chain Rebase Token
+Following the lesson on Cyfrin Updraft by Ciara Nightingale
 
 1. A protocol that allows users to deposit into a vault and in return receive rebase tokens that represent their underlying balance
 2. Rebase token -> balanceOf function is dynamic to show the changing balance with time
