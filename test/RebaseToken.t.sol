@@ -12,11 +12,14 @@ import {Vault} from "src/Vault.sol";
 contract RebaseTokenTest is Test {
     RebaseToken private rebaseToken;
     Vault private vault;
+    EmptyUser private emptyUser;
 
     address public owner = makeAddr("owner");
     address public user = makeAddr("user");
 
     function setUp() public {
+        emptyUser = new EmptyUser();
+
         vm.startPrank(owner);
         rebaseToken = new RebaseToken();
         vault = new Vault(IRebaseToken(address(rebaseToken)));
@@ -123,6 +126,94 @@ contract RebaseTokenTest is Test {
         assertEq(rebaseToken.getUserInterestRate(user2), 5e10);
     }
 
+    function testTransferFullBalance(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        // 1. deposit
+        vm.deal(user, amount);
+        vm.prank(user);
+        vault.deposit{value: amount}();
+
+        address user2 = makeAddr("user2");
+        uint256 userBalance = rebaseToken.balanceOf(user);
+        uint256 user2Balance = rebaseToken.balanceOf(user2);
+        assertEq(userBalance, amount);
+        assertEq(user2Balance, 0);
+
+        // 2. transfer
+        vm.prank(user);
+        rebaseToken.transfer(user2, type(uint256).max);
+        uint256 userBalanceAfterTransfer = rebaseToken.balanceOf(user);
+        uint256 user2BalanceAfterTransfer = rebaseToken.balanceOf(user2);
+        assertEq(userBalanceAfterTransfer, 0);
+        assertEq(user2BalanceAfterTransfer, amount);
+    }
+
+    function testTransferFrom(uint256 amount, uint256 amountToSend) public {
+        amount = bound(amount, 1e5 + 1e5, type(uint96).max);
+        amountToSend = bound(amountToSend, 1e5, amount - 1e5);
+
+        // 1. deposit
+        vm.deal(user, amount);
+        vm.prank(user);
+        vault.deposit{value: amount}();
+
+        address user2 = makeAddr("user2");
+        uint256 userBalance = rebaseToken.balanceOf(user);
+        uint256 user2Balance = rebaseToken.balanceOf(user2);
+        assertEq(userBalance, amount);
+        assertEq(user2Balance, 0);
+
+        // 2. owner reduces the interest rate
+        vm.prank(owner);
+        rebaseToken.setInterestRate(4e10);
+
+        // 3. approve
+        vm.prank(user);
+        rebaseToken.approve(user2, amountToSend);
+
+        // 4. transferFrom
+        vm.prank(user2);
+        rebaseToken.transferFrom(user, user2, amountToSend);
+        uint256 userBalanceAfterTransfer = rebaseToken.balanceOf(user);
+        uint256 user2BalanceAfterTransfer = rebaseToken.balanceOf(user2);
+        assertEq(userBalanceAfterTransfer, userBalance - amountToSend);
+        assertEq(user2BalanceAfterTransfer, amountToSend);
+
+        // check the user interest rate has been inherited (5e10 not 4e10)
+        assertEq(rebaseToken.getUserInterestRate(user), 5e10);
+        assertEq(rebaseToken.getUserInterestRate(user2), 5e10);
+    }
+
+    function testTransferFromFullBalance(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        // 1. deposit
+        vm.deal(user, amount);
+        vm.prank(user);
+        vault.deposit{value: amount}();
+
+        address user2 = makeAddr("user2");
+        uint256 userBalance = rebaseToken.balanceOf(user);
+        uint256 user2Balance = rebaseToken.balanceOf(user2);
+        assertEq(userBalance, amount);
+        assertEq(user2Balance, 0);
+
+        // 2. owner reduces the interest rate
+        vm.prank(owner);
+        rebaseToken.setInterestRate(4e10);
+
+        // 3. approve
+        vm.prank(user);
+        rebaseToken.approve(user2, type(uint256).max);
+
+        // 4. transferFrom
+        vm.prank(user2);
+        rebaseToken.transferFrom(user, user2, type(uint256).max);
+        uint256 userBalanceAfterTransfer = rebaseToken.balanceOf(user);
+        uint256 user2BalanceAfterTransfer = rebaseToken.balanceOf(user2);
+        assertEq(userBalanceAfterTransfer, 0);
+        assertEq(user2BalanceAfterTransfer, amount);
+    }
+
     function testCannotSetInterestRateIfNotOwner(uint256 newInterestRate) public {
         address userAddress = address(user);
         vm.prank(user);
@@ -161,4 +252,23 @@ contract RebaseTokenTest is Test {
         rebaseToken.setInterestRate(newInterestRate);
         assertEq(rebaseToken.getInterestRate(), initialInterestRate);
     }
+
+    function testRedeemFailed(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        address dumby = address(emptyUser);
+        vm.deal(dumby, amount);
+        vm.prank(dumby);
+        vault.deposit{value: amount}();
+        // make sure they have a balance
+        assertEq(rebaseToken.balanceOf(dumby), amount);
+
+        // make sure they can't redeem
+        vm.prank(dumby);
+        vm.expectRevert(Vault.Vault__RedeemFailed.selector);
+        vault.redeem(amount);
+    }
+}
+
+contract EmptyUser {
+// user with no way to get ETH, used to simulate a transfer failed
 }
